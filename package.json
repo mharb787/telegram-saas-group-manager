@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "once": "node src/index.js"
+    "once": "node src/index.js",
+    "start:real-estate": "node src/index.js"
   },
   "keywords": [
     "telegram",

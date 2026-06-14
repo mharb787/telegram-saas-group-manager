@@ -113,6 +113,51 @@ function migrate() {
     CREATE INDEX IF NOT EXISTS idx_groups_bot_id ON groups(bot_id);
     CREATE INDEX IF NOT EXISTS idx_warnings_lookup ON warnings(bot_id, group_id, user_telegram_id);
     CREATE INDEX IF NOT EXISTS idx_subscriptions_bot_id ON subscriptions(bot_id);
+
+    CREATE TABLE IF NOT EXISTS real_estate_users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      telegram_id INTEGER NOT NULL UNIQUE,
+      username TEXT,
+      first_name TEXT,
+      display_name TEXT,
+      phone TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('registered', 'blocked')) DEFAULT 'registered',
+      gateway_attempts INTEGER NOT NULL DEFAULT 0,
+      pending_gateway_chat_id INTEGER,
+      pending_gateway_joined_at TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS real_estate_gateway_visits (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      telegram_id INTEGER NOT NULL,
+      chat_id INTEGER NOT NULL,
+      joined_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      completed_at TEXT,
+      removed_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS real_estate_listings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      public_code TEXT UNIQUE,
+      user_telegram_id INTEGER NOT NULL,
+      category TEXT NOT NULL,
+      listing_type TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('draft', 'pending', 'published', 'rejected', 'needs_changes')) DEFAULT 'pending',
+      payload TEXT NOT NULL,
+      photos TEXT NOT NULL,
+      admin_message_chat_id INTEGER,
+      admin_message_id INTEGER,
+      channel_message_id INTEGER,
+      review_note TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_real_estate_users_telegram_id ON real_estate_users(telegram_id);
+    CREATE INDEX IF NOT EXISTS idx_real_estate_listings_user ON real_estate_listings(user_telegram_id);
+    CREATE INDEX IF NOT EXISTS idx_real_estate_listings_status ON real_estate_listings(status);
   `);
 }
 

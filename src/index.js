@@ -4,6 +4,7 @@ const express = require('express');
 const { migrate } = require('./database');
 const { createMasterBot } = require('./masterBot');
 const { CustomerBotManager } = require('./customerBotManager');
+const { createRealEstateBot } = require('./realEstateBot');
 
 const port = Number.parseInt(process.env.PORT || '3000', 10);
 
@@ -13,14 +14,18 @@ async function main() {
   const app = express();
   app.use(express.json());
 
-  const customerBotManager = new CustomerBotManager();
-  customerBotManager.startAll();
-  createMasterBot(customerBotManager);
+  if (process.env.APP_MODE === 'real_estate') {
+    createRealEstateBot();
+  } else {
+    const customerBotManager = new CustomerBotManager();
+    customerBotManager.startAll();
+    createMasterBot(customerBotManager);
+  }
 
   app.get('/', (req, res) => {
     res.json({
       ok: true,
-      service: 'telegram-saas-group-manager'
+      service: process.env.APP_MODE === 'real_estate' ? 'gaza-real-estate-bot' : 'telegram-saas-group-manager'
     });
   });
 
