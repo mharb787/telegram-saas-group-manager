@@ -592,6 +592,7 @@ function createRealEstateBot() {
 
   bot.on('message', async (msg) => {
     if (!isPrivate(msg) || !msg.from || msg.from.is_bot) return;
+    if (msg.contact) return;
     if (msg.text && msg.text.startsWith('/')) return;
 
     const session = sessions.get(msg.from.id);
