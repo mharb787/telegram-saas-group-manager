@@ -24,6 +24,15 @@ function envNumber(name, fallback) {
   return Number.isFinite(value) ? value : fallback;
 }
 
+function envChatId(name, fallback = '') {
+  const value = process.env[name];
+  if (!value) return fallback;
+  const trimmed = value.trim();
+  if (trimmed.startsWith('@')) return trimmed;
+  const numeric = Number.parseInt(trimmed, 10);
+  return Number.isFinite(numeric) ? numeric : trimmed;
+}
+
 function requiredEnv(name) {
   if (!process.env[name]) throw new Error(`${name} is required for real estate mode`);
   return process.env[name];
@@ -34,14 +43,15 @@ function isPrivate(msg) {
 }
 
 function isGatewayChat(chatId, config) {
-  return config.gatewayGroupId && Number(chatId) === config.gatewayGroupId;
+  if (!config.gatewayGroupId) return true;
+  return String(chatId) === String(config.gatewayGroupId);
 }
 
 function mainMenu() {
   return {
     inline_keyboard: [
       [{ text: 'عرض عقار', callback_data: 'menu:submit' }],
-      [{ text: 'الدخول إلى قناة العروض', callback_data: 'menu:channel' }],
+      [{ text: 'الدخول إلى مجموعة العروض', callback_data: 'menu:offers_group' }],
       [{ text: 'إعلاناتي', callback_data: 'menu:mine' }],
       [{ text: 'تعديل بياناتي', callback_data: 'menu:profile' }]
     ]
@@ -419,7 +429,7 @@ async function publishListing(bot, config, listing) {
   let channelMessageId = null;
 
   if (photos.length === 1) {
-    const sent = await bot.sendPhoto(config.offersChannelId, photos[0], { caption });
+    const sent = await bot.sendPhoto(config.offersGroupId, photos[0], { caption });
     channelMessageId = sent.message_id;
   } else {
     const media = photos.slice(0, 10).map((photo, index) => ({
@@ -427,7 +437,7 @@ async function publishListing(bot, config, listing) {
       media: photo,
       caption: index === 0 ? caption : undefined
     }));
-    const sent = await bot.sendMediaGroup(config.offersChannelId, media);
+    const sent = await bot.sendMediaGroup(config.offersGroupId, media);
     channelMessageId = sent && sent[0] ? sent[0].message_id : null;
   }
 
@@ -437,31 +447,31 @@ async function publishListing(bot, config, listing) {
     WHERE id = ?
   `).run(channelMessageId, listing.id);
 
-  await bot.sendMessage(listing.user_telegram_id, 'تمت الموافقة على إعلانك ونشره في قناة عروض عقارات غزة.');
+  await bot.sendMessage(listing.user_telegram_id, 'تمت الموافقة على إعلانك ونشره في مجموعة عروض عقارات غزة.');
 }
 
-async function sendChannelLink(bot, chatId, config) {
-  if (config.channelInviteLink) {
-    return bot.sendMessage(chatId, 'يمكنك الآن الدخول إلى قناة عروض عقارات غزة:', {
+async function sendOffersGroupLink(bot, chatId, config) {
+  if (config.offersGroupInviteLink) {
+    return bot.sendMessage(chatId, 'يمكنك الآن الدخول إلى مجموعة عروض عقارات غزة:', {
       reply_markup: {
-        inline_keyboard: [[{ text: 'الدخول إلى القناة', url: config.channelInviteLink }]]
+        inline_keyboard: [[{ text: 'الدخول إلى المجموعة', url: config.offersGroupInviteLink }]]
       }
     });
   }
 
   try {
-    const invite = await bot.createChatInviteLink(config.offersChannelId, {
+    const invite = await bot.createChatInviteLink(config.offersGroupId, {
       member_limit: 1,
       creates_join_request: false
     });
-    return bot.sendMessage(chatId, 'يمكنك الآن الدخول إلى قناة عروض عقارات غزة:', {
+    return bot.sendMessage(chatId, 'يمكنك الآن الدخول إلى مجموعة عروض عقارات غزة:', {
       reply_markup: {
-        inline_keyboard: [[{ text: 'الدخول إلى القناة', url: invite.invite_link }]]
+        inline_keyboard: [[{ text: 'الدخول إلى المجموعة', url: invite.invite_link }]]
       }
     });
   } catch (error) {
-    console.warn('create channel invite failed:', error.message);
-    return bot.sendMessage(chatId, 'تم تسجيلك بنجاح. تواصل مع الإدارة للحصول على رابط القناة.');
+    console.warn('create offers group invite failed:', error.message);
+    return bot.sendMessage(chatId, 'تم تسجيلك بنجاح. تواصل مع الإدارة للحصول على رابط المجموعة.');
   }
 }
 
@@ -527,16 +537,25 @@ async function handleNewGatewayMember(bot, config, msg, member) {
 }
 
 function createRealEstateBot() {
+  const offersGroupId = envChatId('OFFERS_GROUP_ID', envChatId('OFFERS_CHANNEL_ID', ''));
   const config = {
     token: requiredEnv('REAL_ESTATE_BOT_TOKEN'),
-    adminChatId: requiredEnv('ADMIN_CHAT_ID'),
-    gatewayGroupId: envNumber('GATEWAY_GROUP_ID', 0),
-    offersChannelId: requiredEnv('OFFERS_CHANNEL_ID'),
-    channelInviteLink: process.env.CHANNEL_INVITE_LINK || '',
+    adminChatId: envChatId('ADMIN_CHAT_ID'),
+    gatewayGroupId: envChatId('GATEWAY_GROUP_ID', ''),
+    offersGroupId,
+    offersGroupInviteLink: process.env.OFFERS_GROUP_INVITE_LINK || process.env.CHANNEL_INVITE_LINK || '',
     registrationGraceMinutes: envNumber('REGISTRATION_GRACE_MINUTES', 15),
     maxGatewayAttempts: envNumber('MAX_GATEWAY_ATTEMPTS', 3),
     botUsername: process.env.REAL_ESTATE_BOT_USERNAME || ''
   };
+
+  if (!config.adminChatId) {
+    throw new Error('ADMIN_CHAT_ID is required for real estate mode');
+  }
+
+  if (!config.offersGroupId) {
+    throw new Error('OFFERS_GROUP_ID is required for real estate mode');
+  }
 
   const bot = new TelegramBot(config.token, { polling: true });
 
@@ -588,7 +607,7 @@ function createRealEstateBot() {
       markRegistered(msg.from, session.phone, name);
       sessions.delete(msg.from.id);
       await bot.sendMessage(msg.chat.id, 'تم تسجيلك بنجاح.', { reply_markup: mainMenu() });
-      return sendChannelLink(bot, msg.chat.id, config);
+      return sendOffersGroupLink(bot, msg.chat.id, config);
     }
 
     if (session.action === 'listing') {
@@ -653,10 +672,10 @@ function createRealEstateBot() {
         return askCategory(bot, chatId);
       }
 
-      if (data === 'menu:channel') {
+      if (data === 'menu:offers_group' || data === 'menu:channel') {
         await bot.answerCallbackQuery(query.id);
         if (!isRegistered(fromId)) return startRegistration(bot, chatId);
-        return sendChannelLink(bot, chatId, config);
+        return sendOffersGroupLink(bot, chatId, config);
       }
 
       if (data === 'menu:profile') {
