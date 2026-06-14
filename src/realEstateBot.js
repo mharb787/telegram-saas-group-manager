@@ -103,12 +103,28 @@ function mainMenu() {
   };
 }
 
+function userKeyboard() {
+  return {
+    keyboard: [
+      [{ text: 'عرض عقار' }, { text: 'إعلاناتي' }],
+      [{ text: 'تعديل البروفايل' }, { text: 'الدخول للمجموعة' }],
+      [{ text: 'حذف الحساب' }]
+    ],
+    resize_keyboard: true,
+    is_persistent: true
+  };
+}
+
 function contactKeyboard() {
   return {
     keyboard: [[{ text: 'مشاركة رقم الهاتف', request_contact: true }]],
     resize_keyboard: true,
     one_time_keyboard: true
   };
+}
+
+function deleteAccount(telegramId) {
+  db.prepare('DELETE FROM real_estate_users WHERE telegram_id = ?').run(telegramId);
 }
 
 function removeKeyboard() {
@@ -598,7 +614,8 @@ async function sendListingToAdmin(bot, config, chatId, session) {
   `).run(config.adminChatId, message.message_id, result.lastInsertRowid);
 
   sessions.delete(chatId);
-  return bot.sendMessage(chatId, 'تم إرسال إعلانك للإدارة للمراجعة.', { reply_markup: mainMenu() });
+  await bot.sendMessage(chatId, 'تم إرسال إعلانك للإدارة للمراجعة.', { reply_markup: userKeyboard() });
+  return bot.sendMessage(chatId, 'يمكنك متابعة الخيارات من القائمة:', { reply_markup: mainMenu() });
 }
 
 async function publishListing(bot, config, listing) {
@@ -672,8 +689,45 @@ async function sendRegistrationSuccess(bot, chatId, config) {
     console.warn('create registration invite failed:', error.message);
   }
 
+  await bot.sendMessage(chatId, 'تم تفعيل قائمة الخيارات أسفل المحادثة.', {
+    reply_markup: userKeyboard()
+  });
+
   return bot.sendMessage(chatId, 'تم تسجيلك بنجاح. اختر من القائمة:', {
     reply_markup: { inline_keyboard: keyboard }
+  });
+}
+
+function startListingFlow(bot, chatId, fromId) {
+  if (!isRegistered(fromId)) return startRegistration(bot, chatId);
+  sessions.set(fromId, { action: 'listing', stepIndex: 0, data: {}, photos: [] });
+  return askCategory(bot, chatId);
+}
+
+function sendMyListings(bot, chatId, fromId) {
+  const rows = db.prepare(`
+    SELECT public_code, category, status, created_at
+    FROM real_estate_listings
+    WHERE user_telegram_id = ?
+    ORDER BY id DESC
+    LIMIT 10
+  `).all(fromId);
+  if (!rows.length) return bot.sendMessage(chatId, 'لا يوجد لديك إعلانات حتى الآن.', { reply_markup: userKeyboard() });
+  return bot.sendMessage(chatId, rows.map((row) => `#${row.public_code} - ${categories[row.category]} - ${row.status}`).join('\n'), {
+    reply_markup: userKeyboard()
+  });
+}
+
+function confirmDeleteAccount(bot, chatId) {
+  return bot.sendMessage(chatId, 'هل أنت متأكد من حذف حسابك وبيانات التسجيل؟', {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: 'نعم، حذف الحساب', callback_data: 'account:delete_confirm' },
+          { text: 'إلغاء', callback_data: 'account:delete_cancel' }
+        ]
+      ]
+    }
   });
 }
 
@@ -767,7 +821,8 @@ function createRealEstateBot() {
       return bot.sendMessage(msg.chat.id, 'تم إيقاف التسجيل لهذا الحساب بسبب تجاوز عدد محاولات الدخول. تواصل مع الإدارة للمراجعة.');
     }
     if (isRegistered(msg.from.id)) {
-      return bot.sendMessage(msg.chat.id, 'أهلاً بك. اختر من القائمة:', { reply_markup: mainMenu() });
+      await bot.sendMessage(msg.chat.id, 'أهلاً بك. قائمة الخيارات جاهزة أسفل المحادثة.', { reply_markup: userKeyboard() });
+      return bot.sendMessage(msg.chat.id, 'اختر من القائمة:', { reply_markup: mainMenu() });
     }
     return startRegistration(bot, msg.chat.id);
   });
@@ -796,6 +851,15 @@ function createRealEstateBot() {
     if (!isPrivate(msg) || !msg.from || msg.from.is_bot) return;
     if (msg.contact) return;
     if (msg.text && msg.text.startsWith('/')) return;
+
+    const text = (msg.text || '').trim();
+    if (isRegistered(msg.from.id) && !sessions.has(msg.from.id)) {
+      if (text === 'عرض عقار') return startListingFlow(bot, msg.chat.id, msg.from.id);
+      if (text === 'إعلاناتي') return sendMyListings(bot, msg.chat.id, msg.from.id);
+      if (text === 'تعديل البروفايل' || text === 'تعديل بياناتي') return startRegistration(bot, msg.chat.id);
+      if (text === 'الدخول للمجموعة') return sendOffersGroupLink(bot, msg.chat.id, config);
+      if (text === 'حذف الحساب') return confirmDeleteAccount(bot, msg.chat.id);
+    }
 
     const session = sessions.get(msg.from.id);
     if (!session) return;
@@ -870,9 +934,7 @@ function createRealEstateBot() {
       if (data === 'menu:submit') {
         await bot.answerCallbackQuery(query.id);
         await deletePrompt(bot, query);
-        if (!isRegistered(fromId)) return startRegistration(bot, chatId);
-        sessions.set(fromId, { action: 'listing', stepIndex: 0, data: {}, photos: [] });
-        return askCategory(bot, chatId);
+        return startListingFlow(bot, chatId, fromId);
       }
 
       if (data === 'menu:offers_group' || data === 'menu:channel') {
@@ -891,22 +953,29 @@ function createRealEstateBot() {
       if (data === 'menu:mine') {
         await bot.answerCallbackQuery(query.id);
         await deletePrompt(bot, query);
-        const rows = db.prepare(`
-          SELECT public_code, category, status, created_at
-          FROM real_estate_listings
-          WHERE user_telegram_id = ?
-          ORDER BY id DESC
-          LIMIT 10
-        `).all(fromId);
-        if (!rows.length) return bot.sendMessage(chatId, 'لا يوجد لديك إعلانات حتى الآن.');
-        return bot.sendMessage(chatId, rows.map((row) => `#${row.public_code} - ${categories[row.category]} - ${row.status}`).join('\n'));
+        return sendMyListings(bot, chatId, fromId);
+      }
+
+      if (data === 'account:delete_cancel') {
+        await bot.answerCallbackQuery(query.id);
+        await deletePrompt(bot, query);
+        return bot.sendMessage(chatId, 'تم إلغاء حذف الحساب.', { reply_markup: userKeyboard() });
+      }
+
+      if (data === 'account:delete_confirm') {
+        await bot.answerCallbackQuery(query.id);
+        await deletePrompt(bot, query);
+        sessions.delete(fromId);
+        deleteAccount(fromId);
+        return bot.sendMessage(chatId, 'تم حذف حسابك من النظام. يمكنك التسجيل مرة أخرى في أي وقت.', { reply_markup: removeKeyboard() });
       }
 
       if (data === 'flow:cancel') {
         sessions.delete(fromId);
         await bot.answerCallbackQuery(query.id);
         await deletePrompt(bot, query);
-        return bot.sendMessage(chatId, 'تم إلغاء العملية.', { reply_markup: mainMenu() });
+        await bot.sendMessage(chatId, 'تم إلغاء العملية.', { reply_markup: userKeyboard() });
+        return bot.sendMessage(chatId, 'اختر من القائمة:', { reply_markup: mainMenu() });
       }
 
       if (data.startsWith('cat:')) {
