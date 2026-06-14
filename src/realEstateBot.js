@@ -428,11 +428,23 @@ function currencyChoice(bot, chatId) {
   });
 }
 
+function numberChoice(bot, chatId, session, key, question) {
+  return bot.sendMessage(chatId, promptText(session, `${question}\nيمكنك اختيار رقم أو كتابة العدد يدويًا.`), {
+    reply_markup: {
+      inline_keyboard: [[1, 2, 3, 4, 5].map((value) => ({
+        text: String(value),
+        callback_data: `number:${key}:${value}`
+      }))]
+    }
+  });
+}
+
 async function askNext(bot, chatId, session) {
   const question = currentQuestion(session);
   if (!question) return showSummary(bot, chatId, session);
   const [key, text] = question;
 
+  if (session.category === 'house' && key === 'floors') return numberChoice(bot, chatId, session, key, text);
   if (key === 'contact') return contactChoice(bot, chatId);
   if (key === 'land_kind') return landKindChoice(bot, chatId);
   if (key === 'has_extra_land') return yesNo(bot, chatId, 'extraLand');
@@ -846,6 +858,7 @@ function createRealEstateBot() {
     try {
       if (data === 'menu:submit') {
         await bot.answerCallbackQuery(query.id);
+        await deletePrompt(bot, query);
         if (!isRegistered(fromId)) return startRegistration(bot, chatId);
         sessions.set(fromId, { action: 'listing', stepIndex: 0, data: {}, photos: [] });
         return askCategory(bot, chatId);
@@ -853,17 +866,20 @@ function createRealEstateBot() {
 
       if (data === 'menu:offers_group' || data === 'menu:channel') {
         await bot.answerCallbackQuery(query.id);
+        await deletePrompt(bot, query);
         if (!isRegistered(fromId)) return startRegistration(bot, chatId);
         return sendOffersGroupLink(bot, chatId, config);
       }
 
       if (data === 'menu:profile') {
         await bot.answerCallbackQuery(query.id);
+        await deletePrompt(bot, query);
         return startRegistration(bot, chatId);
       }
 
       if (data === 'menu:mine') {
         await bot.answerCallbackQuery(query.id);
+        await deletePrompt(bot, query);
         const rows = db.prepare(`
           SELECT public_code, category, status, created_at
           FROM real_estate_listings
@@ -909,6 +925,20 @@ function createRealEstateBot() {
         if (!session || session.action !== 'listing') return;
         session.listingType = data.split(':')[1];
         session.data.listing_type = session.listingType;
+        sessions.set(fromId, session);
+        await bot.answerCallbackQuery(query.id);
+        await deletePrompt(bot, query);
+        return askNext(bot, chatId, session);
+      }
+
+      if (data.startsWith('number:')) {
+        const session = sessions.get(fromId);
+        if (!session || session.action !== 'listing') return;
+        const [, key, value] = data.split(':');
+        const question = currentQuestion(session);
+        if (!question || question[0] !== key) return;
+        session.data[key] = value;
+        session.stepIndex += 1;
         sessions.set(fromId, session);
         await bot.answerCallbackQuery(query.id);
         await deletePrompt(bot, query);
