@@ -25,6 +25,11 @@ const currencies = {
   ils: 'شيكل إسرائيلي'
 };
 
+const rentPeriods = {
+  monthly: 'شهري',
+  yearly: 'سنوي'
+};
+
 const regions = {
   north_gaza: 'شمال غزة',
   gaza_city: 'غزة المدينة',
@@ -258,6 +263,7 @@ function deletePrompt(bot, query) {
 function valueLabel(key, value) {
   if (key === 'category') return categories[value] || value;
   if (key === 'listing_type') return value === 'sale' ? 'بيع' : 'إيجار';
+  if (key === 'rent_period') return rentPeriods[value] || value;
   if (key === 'roof_state') return value === 'open' ? 'مساحة مفتوحة' : 'بناء قائم';
   if (key === 'has_extra_land') return value === 'yes' ? 'نعم' : 'لا';
   if (key === 'land_kind') return landKinds[value] || value;
@@ -276,6 +282,7 @@ function progressLines(session) {
   const labels = {
     category: '🏷️ نوع العقار',
     listing_type: '📌 نوع العرض',
+    rent_period: '🗓️ مدة الإيجار',
     roof_state: '🏗️ حالة الرووف',
     floors: '🏢 عدد الطوابق',
     land_area: '📐 مساحة الأرض',
@@ -332,6 +339,14 @@ function askListingType(bot, chatId) {
   return bot.sendMessage(chatId, promptText(session, 'اختر نوع العرض:'), promptOptions([[
     { text: 'بيع', callback_data: 'type:sale' },
     { text: 'إيجار', callback_data: 'type:rent' }
+  ]]));
+}
+
+function rentPeriodChoice(bot, chatId) {
+  const session = sessions.get(chatId);
+  return bot.sendMessage(chatId, promptText(session, 'اختر مدة الإيجار:'), promptOptions([[
+    { text: 'شهري', callback_data: 'rentPeriod:monthly' },
+    { text: 'سنوي', callback_data: 'rentPeriod:yearly' }
   ]]));
 }
 
@@ -482,6 +497,7 @@ function listingLines(payload, options = {}) {
   ];
 
   const labels = {
+    rent_period: '🗓️ مدة الإيجار',
     roof_state: '🏗️ حالة الرووف',
     floors: '🏢 عدد الطوابق',
     land_area: '📐 مساحة الأرض',
@@ -1027,6 +1043,18 @@ function createRealEstateBot() {
         if (!session || session.action !== 'listing') return;
         session.listingType = data.split(':')[1];
         session.data.listing_type = session.listingType;
+        sessions.set(fromId, session);
+        await bot.answerCallbackQuery(query.id);
+        await deletePrompt(bot, query);
+        if (session.listingType === 'rent') return rentPeriodChoice(bot, chatId);
+        delete session.data.rent_period;
+        return askNext(bot, chatId, session);
+      }
+
+      if (data.startsWith('rentPeriod:')) {
+        const session = sessions.get(fromId);
+        if (!session || session.action !== 'listing') return;
+        session.data.rent_period = data.split(':')[1];
         sessions.set(fromId, session);
         await bot.answerCallbackQuery(query.id);
         await deletePrompt(bot, query);
