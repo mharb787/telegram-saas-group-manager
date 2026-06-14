@@ -207,6 +207,26 @@ function scheduleDailyGuide(bot, config) {
   setInterval(run, 60 * 60 * 1000);
 }
 
+async function safeDeleteMessage(bot, chatId, messageId) {
+  if (!chatId || !messageId) return;
+  try {
+    await bot.deleteMessage(chatId, messageId);
+  } catch (error) {
+    console.warn('delete message failed:', error.message);
+  }
+}
+
+async function clearGatewayPrompt(bot, telegramId) {
+  const user = getUser(telegramId);
+  if (!user || !user.pending_gateway_chat_id || !user.pending_gateway_message_id) return;
+  await safeDeleteMessage(bot, user.pending_gateway_chat_id, user.pending_gateway_message_id);
+  db.prepare(`
+    UPDATE real_estate_users
+    SET pending_gateway_message_id = NULL, updated_at = CURRENT_TIMESTAMP
+    WHERE telegram_id = ?
+  `).run(telegramId);
+}
+
 async function removeUserFromOffersGroup(bot, config, userId) {
   try {
     await bot.banChatMember(config.offersGroupId, userId);
@@ -264,11 +284,19 @@ function touchGatewayAttempt(member, chatId) {
   return attempts;
 }
 
+function setPendingGatewayMessage(telegramId, messageId) {
+  db.prepare(`
+    UPDATE real_estate_users
+    SET pending_gateway_message_id = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE telegram_id = ?
+  `).run(messageId, telegramId);
+}
+
 function markRegistered(from, phone, displayName) {
   db.prepare(`
     INSERT INTO real_estate_users
-      (telegram_id, username, first_name, display_name, phone, status, pending_gateway_chat_id)
-    VALUES (?, ?, ?, ?, ?, 'registered', NULL)
+      (telegram_id, username, first_name, display_name, phone, status, pending_gateway_chat_id, pending_gateway_message_id)
+    VALUES (?, ?, ?, ?, ?, 'registered', NULL, NULL)
     ON CONFLICT(telegram_id) DO UPDATE SET
       username = excluded.username,
       first_name = excluded.first_name,
@@ -276,6 +304,7 @@ function markRegistered(from, phone, displayName) {
       phone = excluded.phone,
       status = 'registered',
       pending_gateway_chat_id = NULL,
+      pending_gateway_message_id = NULL,
       updated_at = CURRENT_TIMESTAMP
   `).run(from.id, from.username || '', from.first_name || '', displayName, phone);
 
@@ -859,6 +888,7 @@ function startRegistration(bot, chatId) {
 
 async function handleNewGatewayMember(bot, config, msg, member) {
   if (member.is_bot) return;
+  await safeDeleteMessage(bot, msg.chat.id, msg.message_id);
   upsertVisit(member.id, msg.chat.id);
 
   if (isRegistered(member.id)) return;
@@ -885,11 +915,14 @@ async function handleNewGatewayMember(bot, config, msg, member) {
   const options = botUsername
     ? { reply_markup: { inline_keyboard: [[{ text: 'إتمام التسجيل', url: botUsername }]] } }
     : {};
-  await bot.sendMessage(msg.chat.id, text, options);
+  const promptMessage = await bot.sendMessage(msg.chat.id, text, options);
+  setPendingGatewayMessage(member.id, promptMessage.message_id);
 
   const timerKey = `${msg.chat.id}:${member.id}`;
-  clearTimeout(pendingTimers.get(timerKey));
+  const previous = pendingTimers.get(timerKey);
+  if (previous) clearTimeout(previous.timer || previous);
   const timer = setTimeout(async () => {
+    await clearGatewayPrompt(bot, member.id);
     if (isRegistered(member.id)) return;
     try {
       await bot.banChatMember(msg.chat.id, member.id);
@@ -903,7 +936,7 @@ async function handleNewGatewayMember(bot, config, msg, member) {
       console.warn('gateway timeout removal failed:', error.message);
     }
   }, config.registrationGraceMinutes * 60 * 1000);
-  pendingTimers.set(timerKey, timer);
+  pendingTimers.set(timerKey, { timer, promptMessageId: promptMessage.message_id });
 }
 
 function createRealEstateBot() {
@@ -940,6 +973,11 @@ function createRealEstateBot() {
     for (const member of msg.new_chat_members || []) {
       await handleNewGatewayMember(bot, config, msg, member);
     }
+  });
+
+  bot.on('left_chat_member', async (msg) => {
+    if (!isGatewayChat(msg.chat.id, config)) return;
+    await safeDeleteMessage(bot, msg.chat.id, msg.message_id);
   });
 
   bot.on('contact', async (msg) => {
@@ -980,6 +1018,16 @@ function createRealEstateBot() {
     if (session.action === 'awaiting_name') {
       const name = (msg.text || '').trim();
       if (name.length < 2) return bot.sendMessage(msg.chat.id, 'اكتب اسمًا أو كنية من حرفين على الأقل.');
+      const existing = getUser(msg.from.id);
+      if (existing && existing.pending_gateway_chat_id) {
+        const timerKey = `${existing.pending_gateway_chat_id}:${msg.from.id}`;
+        const pending = pendingTimers.get(timerKey);
+        if (pending) {
+          clearTimeout(pending.timer || pending);
+          pendingTimers.delete(timerKey);
+        }
+      }
+      await clearGatewayPrompt(bot, msg.from.id);
       markRegistered(msg.from, session.phone, name);
       sessions.delete(msg.from.id);
       return sendRegistrationSuccess(bot, msg.chat.id, config);

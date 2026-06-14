@@ -124,6 +124,7 @@ function migrate() {
       status TEXT NOT NULL CHECK(status IN ('registered', 'blocked')) DEFAULT 'registered',
       gateway_attempts INTEGER NOT NULL DEFAULT 0,
       pending_gateway_chat_id INTEGER,
+      pending_gateway_message_id INTEGER,
       pending_gateway_joined_at TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -165,6 +166,12 @@ function migrate() {
     CREATE INDEX IF NOT EXISTS idx_real_estate_listings_user ON real_estate_listings(user_telegram_id);
     CREATE INDEX IF NOT EXISTS idx_real_estate_listings_status ON real_estate_listings(status);
   `);
+
+  try {
+    db.exec('ALTER TABLE real_estate_users ADD COLUMN pending_gateway_message_id INTEGER');
+  } catch (error) {
+    if (!String(error.message).includes('duplicate column name')) throw error;
+  }
 }
 
 module.exports = {
