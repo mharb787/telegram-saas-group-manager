@@ -19,6 +19,47 @@ const landKinds = {
   unknown: 'غير محدد'
 };
 
+const currencies = {
+  usd: 'دولار أمريكي',
+  jod: 'دينار أردني',
+  ils: 'شيكل إسرائيلي'
+};
+
+const regions = {
+  north_gaza: 'شمال غزة',
+  gaza_city: 'غزة المدينة',
+  central: 'الوسطى',
+  khan_younis: 'خانيونس',
+  rafah: 'رفح'
+};
+
+const subregions = {
+  north_gaza: {
+    beit_lahia: 'بيت لاهيا',
+    jabalia: 'جباليا',
+    beit_hanoun: 'بيت حانون'
+  },
+  gaza_city: {
+    east_gaza: 'شرق غزة',
+    west_gaza: 'غرب غزة'
+  },
+  central: {
+    nuseirat: 'النصيرات',
+    bureij: 'البريج',
+    deir_al_balah: 'دير البلح',
+    maghazi: 'المغازي',
+    zawaida: 'الزوايدة'
+  },
+  khan_younis: {
+    east_khan_younis: 'شرق خانيونس',
+    west_khan_younis: 'غرب خانيونس'
+  },
+  rafah: {
+    east_rafah: 'شرق رفح',
+    west_rafah: 'غرب رفح'
+  }
+};
+
 function envNumber(name, fallback) {
   const value = Number.parseInt(process.env[name] || '', 10);
   return Number.isFinite(value) ? value : fallback;
@@ -50,10 +91,14 @@ function isGatewayChat(chatId, config) {
 function mainMenu() {
   return {
     inline_keyboard: [
-      [{ text: 'عرض عقار', callback_data: 'menu:submit' }],
-      [{ text: 'الدخول إلى مجموعة العروض', callback_data: 'menu:offers_group' }],
-      [{ text: 'إعلاناتي', callback_data: 'menu:mine' }],
-      [{ text: 'تعديل بياناتي', callback_data: 'menu:profile' }]
+      [
+        { text: 'عرض عقار', callback_data: 'menu:submit' },
+        { text: 'الدخول إلى مجموعة العروض', callback_data: 'menu:offers_group' }
+      ],
+      [
+        { text: 'إعلاناتي', callback_data: 'menu:mine' },
+        { text: 'تعديل بياناتي', callback_data: 'menu:profile' }
+      ]
     ]
   };
 }
@@ -148,15 +193,79 @@ function nextListingCode() {
   return `A${String(next).padStart(4, '0')}`;
 }
 
+function rows(items, perRow = 2) {
+  const result = [];
+  for (let index = 0; index < items.length; index += perRow) {
+    result.push(items.slice(index, index + perRow));
+  }
+  return result;
+}
+
+function deletePrompt(bot, query) {
+  if (!query.message) return Promise.resolve();
+  return bot.deleteMessage(query.message.chat.id, query.message.message_id).catch(() => {});
+}
+
+function valueLabel(key, value) {
+  if (key === 'category') return categories[value] || value;
+  if (key === 'listing_type') return value === 'sale' ? 'بيع' : 'إيجار';
+  if (key === 'roof_state') return value === 'open' ? 'مساحة مفتوحة' : 'بناء قائم';
+  if (key === 'has_extra_land') return value === 'yes' ? 'نعم' : 'لا';
+  if (key === 'land_kind') return landKinds[value] || value;
+  if (key === 'currency') return currencies[value] || value;
+  if (key === 'region') return regions[value] || value;
+  if (key === 'subregion') {
+    for (const options of Object.values(subregions)) {
+      if (options[value]) return options[value];
+    }
+    return value;
+  }
+  return value;
+}
+
+function progressLines(session) {
+  const labels = {
+    category: 'نوع العقار',
+    listing_type: 'نوع العرض',
+    roof_state: 'حالة الرووف',
+    floors: 'عدد الطوابق',
+    land_area: 'مساحة الأرض',
+    building_area: 'مساحة البناء',
+    bathrooms: 'عدد الحمامات',
+    rooms: 'عدد الغرف',
+    has_extra_land: 'أرض/حديقة إضافية',
+    extra_land_area: 'مساحة الإضافي',
+    area: 'المساحة',
+    floor: 'الطابق',
+    street_width: 'عرض الشارع',
+    land_kind: 'نوع الأرض',
+    region: 'المنطقة',
+    subregion: 'المنطقة الفرعية',
+    address_detail: 'العنوان التفصيلي',
+    currency: 'العملة',
+    price_value: 'قيمة السعر',
+    contact_phone: 'رقم التواصل',
+    notes: 'ملاحظات'
+  };
+
+  return Object.keys(labels)
+    .filter((key) => session.data[key] && session.data[key] !== '-')
+    .map((key) => `${labels[key]}: ${valueLabel(key, session.data[key])}`);
+}
+
+function promptText(session, question) {
+  const lines = progressLines(session);
+  if (!lines.length) return question;
+  return `${lines.join('\n')}\n\n${question}`;
+}
+
 function askCategory(bot, chatId) {
   return bot.sendMessage(chatId, 'اختر نوع العقار:', {
     reply_markup: {
       inline_keyboard: [
         [
           { text: 'شقة', callback_data: 'cat:apartment' },
-          { text: 'منزل', callback_data: 'cat:house' }
-        ],
-        [
+          { text: 'منزل', callback_data: 'cat:house' },
           { text: 'أرض', callback_data: 'cat:land' },
           { text: 'كراج', callback_data: 'cat:garage' },
           { text: 'رووف', callback_data: 'cat:roof' }
@@ -168,7 +277,8 @@ function askCategory(bot, chatId) {
 }
 
 function askListingType(bot, chatId) {
-  return bot.sendMessage(chatId, 'اختر نوع العرض:', {
+  const session = sessions.get(chatId);
+  return bot.sendMessage(chatId, promptText(session, 'اختر نوع العرض:'), {
     reply_markup: {
       inline_keyboard: [
         [
@@ -183,8 +293,11 @@ function askListingType(bot, chatId) {
 
 function questionPlan(session) {
   const commonTail = [
-    ['address', 'اكتب العنوان بالتفصيل:'],
-    ['price', 'اكتب السعر بشكل واضح. السعر إلزامي:'],
+    ['region', 'اختر المنطقة:'],
+    ['subregion', 'اختر المنطقة الفرعية:'],
+    ['address_detail', 'اكتب العنوان التفصيلي:'],
+    ['currency', 'اختر عملة السعر:'],
+    ['price_value', 'اكتب قيمة السعر. السعر إلزامي:'],
     ['contact', 'اختر رقم التواصل:'],
     ['notes', 'اكتب ملاحظات إضافية أو أرسل "-" للتخطي:'],
     ['photos', 'أرسل صورة واحدة على الأقل للعقار. يمكنك إرسال أكثر من صورة، ثم اضغط تم.']
@@ -193,30 +306,30 @@ function questionPlan(session) {
   const byCategory = {
     house: [
       ['floors', 'كم عدد الطوابق؟'],
-      ['land_area', 'ما مساحة الأرض؟'],
-      ['building_area', 'ما مساحة البناء؟'],
+      ['land_area', 'ما مساحة الأرض بالمتر المربع؟'],
+      ['building_area', 'ما مساحة البناء بالمتر المربع؟'],
       ['bathrooms', 'كم عدد الحمامات؟'],
       ['rooms', 'كم عدد الغرف؟'],
       ['has_extra_land', 'هل يوجد أرض/حديقة إضافية؟']
     ],
     apartment: [
-      ['area', 'ما مساحة الشقة؟'],
+      ['area', 'ما المساحة بالمتر المربع؟'],
       ['rooms', 'كم عدد الغرف؟'],
       ['bathrooms', 'كم عدد الحمامات؟'],
       ['floor', 'في أي طابق؟']
     ],
     land: [
-      ['area', 'ما مساحة الأرض؟'],
-      ['street_width', 'كم عرض الشارع؟'],
+      ['area', 'ما مساحة الأرض بالمتر المربع؟'],
+      ['street_width', 'كم عرض الشارع بالمتر؟'],
       ['land_kind', 'اختر نوع الأرض:']
     ],
     garage: [
-      ['area', 'ما مساحة الكراج؟']
+      ['area', 'ما المساحة بالمتر المربع؟']
     ],
     roof: session.data.roof_state === 'open'
-      ? [['area', 'ما مساحة الرووف؟']]
+      ? [['area', 'ما المساحة بالمتر المربع؟']]
       : [
-        ['area', 'ما مساحة الرووف؟'],
+        ['area', 'ما المساحة بالمتر المربع؟'],
         ['rooms', 'كم عدد الغرف؟'],
         ['bathrooms', 'كم عدد الحمامات؟']
       ]
@@ -225,7 +338,7 @@ function questionPlan(session) {
   const plan = [...byCategory[session.category], ...commonTail];
   if (session.data.has_extra_land === 'yes' && !plan.find(([key]) => key === 'extra_land_area')) {
     const index = plan.findIndex(([key]) => key === 'has_extra_land');
-    plan.splice(index + 1, 0, ['extra_land_area', 'ما مساحة الأرض/الحديقة الإضافية؟']);
+    plan.splice(index + 1, 0, ['extra_land_area', 'ما مساحة الأرض/الحديقة الإضافية بالمتر المربع؟']);
   }
   return plan;
 }
@@ -235,25 +348,27 @@ function currentQuestion(session) {
 }
 
 function contactChoice(bot, chatId) {
-  return bot.sendMessage(chatId, 'اختر رقم التواصل:', {
+  const session = sessions.get(chatId);
+  return bot.sendMessage(chatId, promptText(session, 'اختر رقم التواصل:'), {
     reply_markup: {
       inline_keyboard: [
-        [{ text: 'استخدام رقمي المسجل', callback_data: 'contact:registered' }],
-        [{ text: 'إضافة رقم آخر للتواصل', callback_data: 'contact:other' }]
+        [
+          { text: 'استخدام رقمي المسجل', callback_data: 'contact:registered' },
+          { text: 'إضافة رقم آخر للتواصل', callback_data: 'contact:other' }
+        ]
       ]
     }
   });
 }
 
 function landKindChoice(bot, chatId) {
-  return bot.sendMessage(chatId, 'اختر نوع الأرض:', {
+  const session = sessions.get(chatId);
+  return bot.sendMessage(chatId, promptText(session, 'اختر نوع الأرض:'), {
     reply_markup: {
       inline_keyboard: [
         [
           { text: 'سكنية', callback_data: 'landkind:residential' },
-          { text: 'تجارية', callback_data: 'landkind:commercial' }
-        ],
-        [
+          { text: 'تجارية', callback_data: 'landkind:commercial' },
           { text: 'زراعية', callback_data: 'landkind:agricultural' },
           { text: 'غير محدد', callback_data: 'landkind:unknown' }
         ]
@@ -263,7 +378,8 @@ function landKindChoice(bot, chatId) {
 }
 
 function yesNo(bot, chatId, key) {
-  return bot.sendMessage(chatId, 'اختر:', {
+  const session = sessions.get(chatId);
+  return bot.sendMessage(chatId, promptText(session, 'اختر:'), {
     reply_markup: {
       inline_keyboard: [[
         { text: 'نعم', callback_data: `${key}:yes` },
@@ -274,12 +390,40 @@ function yesNo(bot, chatId, key) {
 }
 
 function roofStateChoice(bot, chatId) {
-  return bot.sendMessage(chatId, 'ما حالة الرووف؟', {
+  const session = sessions.get(chatId);
+  return bot.sendMessage(chatId, promptText(session, 'ما حالة الرووف؟'), {
     reply_markup: {
       inline_keyboard: [[
         { text: 'بناء قائم', callback_data: 'roof:built' },
         { text: 'مساحة مفتوحة', callback_data: 'roof:open' }
       ]]
+    }
+  });
+}
+
+function regionChoice(bot, chatId) {
+  const session = sessions.get(chatId);
+  return bot.sendMessage(chatId, promptText(session, 'اختر المنطقة:'), {
+    reply_markup: {
+      inline_keyboard: rows(Object.entries(regions).map(([key, text]) => ({ text, callback_data: `region:${key}` })), 2)
+    }
+  });
+}
+
+function subregionChoice(bot, chatId, session) {
+  const options = subregions[session.data.region] || {};
+  return bot.sendMessage(chatId, promptText(session, 'اختر المنطقة الفرعية:'), {
+    reply_markup: {
+      inline_keyboard: rows(Object.entries(options).map(([key, text]) => ({ text, callback_data: `subregion:${key}` })), 2)
+    }
+  });
+}
+
+function currencyChoice(bot, chatId) {
+  const session = sessions.get(chatId);
+  return bot.sendMessage(chatId, promptText(session, 'اختر عملة السعر:'), {
+    reply_markup: {
+      inline_keyboard: rows(Object.entries(currencies).map(([key, text]) => ({ text, callback_data: `currency:${key}` })), 2)
     }
   });
 }
@@ -292,14 +436,17 @@ async function askNext(bot, chatId, session) {
   if (key === 'contact') return contactChoice(bot, chatId);
   if (key === 'land_kind') return landKindChoice(bot, chatId);
   if (key === 'has_extra_land') return yesNo(bot, chatId, 'extraLand');
+  if (key === 'region') return regionChoice(bot, chatId);
+  if (key === 'subregion') return subregionChoice(bot, chatId, session);
+  if (key === 'currency') return currencyChoice(bot, chatId);
   if (key === 'photos') {
-    return bot.sendMessage(chatId, text, {
+    return bot.sendMessage(chatId, promptText(session, text), {
       reply_markup: {
         inline_keyboard: [[{ text: 'تم', callback_data: 'photos:done' }]]
       }
     });
   }
-  return bot.sendMessage(chatId, text);
+  return bot.sendMessage(chatId, promptText(session, text));
 }
 
 function listingLines(payload, options = {}) {
@@ -323,8 +470,11 @@ function listingLines(payload, options = {}) {
     floor: 'الطابق',
     street_width: 'عرض الشارع',
     land_kind: 'نوع الأرض',
-    address: 'العنوان',
-    price: 'السعر',
+    region: 'المنطقة',
+    subregion: 'المنطقة الفرعية',
+    address_detail: 'العنوان التفصيلي',
+    currency: 'العملة',
+    price_value: 'السعر',
     contact_phone: 'للتواصل',
     notes: 'ملاحظات'
   };
@@ -335,6 +485,9 @@ function listingLines(payload, options = {}) {
     if (key === 'roof_state') value = value === 'open' ? 'مساحة مفتوحة' : 'بناء قائم';
     if (key === 'has_extra_land') value = value === 'yes' ? 'نعم' : 'لا';
     if (key === 'land_kind') value = landKinds[value] || value;
+    if (key === 'region') value = regions[value] || value;
+    if (key === 'subregion') value = valueLabel(key, value);
+    if (key === 'currency') value = currencies[value] || value;
     lines.push(`${labels[key]}: ${value}`);
   }
 
@@ -351,7 +504,7 @@ function listingLines(payload, options = {}) {
 function validateAnswer(key, text) {
   const value = (text || '').trim();
   if (!value) return 'هذا الحقل إلزامي.';
-  if (key === 'price' && value === '-') return 'السعر إلزامي ولا يمكن تخطيه.';
+  if (key === 'price_value' && value === '-') return 'السعر إلزامي ولا يمكن تخطيه.';
   return null;
 }
 
@@ -365,12 +518,15 @@ async function showSummary(bot, chatId, session) {
   session.data.user_telegram_id = chatId;
   session.data.photos_count = session.photos.length;
 
-  const summary = listingLines(session.data);
-  return bot.sendMessage(chatId, `${summary}\n\nهل تريد إرسال الإعلان للإدارة؟`, {
+  const summary = `${listingLines(session.data)}\n\nهل تريد إرسال الإعلان للإدارة؟`;
+  return bot.sendPhoto(chatId, session.photos[0], {
+    caption: summary,
     reply_markup: {
       inline_keyboard: [
-        [{ text: 'إرسال للإدارة', callback_data: 'submit:send' }],
-        [{ text: 'تعديل من البداية', callback_data: 'menu:submit' }],
+        [
+          { text: 'إرسال للإدارة', callback_data: 'submit:send' },
+          { text: 'تعديل من البداية', callback_data: 'menu:submit' }
+        ],
         [{ text: 'إلغاء', callback_data: 'flow:cancel' }]
       ]
     }
@@ -475,6 +631,29 @@ async function sendOffersGroupLink(bot, chatId, config) {
   }
 }
 
+async function offersGroupUrl(bot, config) {
+  if (config.offersGroupInviteLink) return config.offersGroupInviteLink;
+  const invite = await bot.createChatInviteLink(config.offersGroupId, {
+    member_limit: 1,
+    creates_join_request: false
+  });
+  return invite.invite_link;
+}
+
+async function sendRegistrationSuccess(bot, chatId, config) {
+  const keyboard = mainMenu().inline_keyboard;
+  try {
+    const url = await offersGroupUrl(bot, config);
+    keyboard.unshift([{ text: 'تم تسجيلك بنجاح - الدخول إلى المجموعة', url }]);
+  } catch (error) {
+    console.warn('create registration invite failed:', error.message);
+  }
+
+  return bot.sendMessage(chatId, 'تم تسجيلك بنجاح. اختر من القائمة:', {
+    reply_markup: { inline_keyboard: keyboard }
+  });
+}
+
 function startRegistration(bot, chatId) {
   if (isBlocked(chatId)) {
     return bot.sendMessage(chatId, 'تم إيقاف التسجيل لهذا الحساب بسبب تجاوز عدد محاولات الدخول. تواصل مع الإدارة للمراجعة.');
@@ -508,7 +687,7 @@ async function handleNewGatewayMember(bot, config, msg, member) {
 
   const text = [
     `أهلاً ${member.first_name || ''}.`,
-    'للدخول إلى قناة عروض عقارات غزة يجب إتمام التسجيل عبر البوت في الخاص.',
+    'للبقاء في مجموعة عروض عقارات غزة يجب إتمام التسجيل عبر البوت في الخاص.',
     `لديك ${config.registrationGraceMinutes} دقيقة لإتمام التسجيل.`
   ].join('\n');
 
@@ -607,8 +786,7 @@ function createRealEstateBot() {
       if (name.length < 2) return bot.sendMessage(msg.chat.id, 'اكتب اسمًا أو كنية من حرفين على الأقل.');
       markRegistered(msg.from, session.phone, name);
       sessions.delete(msg.from.id);
-      await bot.sendMessage(msg.chat.id, 'تم تسجيلك بنجاح.', { reply_markup: mainMenu() });
-      return sendOffersGroupLink(bot, msg.chat.id, config);
+      return sendRegistrationSuccess(bot, msg.chat.id, config);
     }
 
     if (session.action === 'listing') {
@@ -627,7 +805,7 @@ function createRealEstateBot() {
         return bot.sendMessage(msg.chat.id, 'أرسل صورة للعقار. صورة واحدة على الأقل إلزامية.');
       }
 
-      if (['contact', 'land_kind', 'has_extra_land'].includes(key)) return;
+      if (['contact', 'land_kind', 'has_extra_land', 'region', 'subregion', 'currency'].includes(key)) return;
       const error = validateAnswer(key, msg.text);
       if (error) return bot.sendMessage(msg.chat.id, error);
       session.data[key] = msg.text.trim();
@@ -700,6 +878,7 @@ function createRealEstateBot() {
       if (data === 'flow:cancel') {
         sessions.delete(fromId);
         await bot.answerCallbackQuery(query.id);
+        await deletePrompt(bot, query);
         return bot.sendMessage(chatId, 'تم إلغاء العملية.', { reply_markup: mainMenu() });
       }
 
@@ -710,6 +889,7 @@ function createRealEstateBot() {
         session.data.category = session.category;
         sessions.set(fromId, session);
         await bot.answerCallbackQuery(query.id);
+        await deletePrompt(bot, query);
         if (session.category === 'roof') return roofStateChoice(bot, chatId);
         return askListingType(bot, chatId);
       }
@@ -720,6 +900,7 @@ function createRealEstateBot() {
         session.data.roof_state = data.split(':')[1];
         sessions.set(fromId, session);
         await bot.answerCallbackQuery(query.id);
+        await deletePrompt(bot, query);
         return askListingType(bot, chatId);
       }
 
@@ -730,6 +911,7 @@ function createRealEstateBot() {
         session.data.listing_type = session.listingType;
         sessions.set(fromId, session);
         await bot.answerCallbackQuery(query.id);
+        await deletePrompt(bot, query);
         return askNext(bot, chatId, session);
       }
 
@@ -740,6 +922,7 @@ function createRealEstateBot() {
         session.stepIndex += 1;
         sessions.set(fromId, session);
         await bot.answerCallbackQuery(query.id);
+        await deletePrompt(bot, query);
         return askNext(bot, chatId, session);
       }
 
@@ -750,6 +933,41 @@ function createRealEstateBot() {
         session.stepIndex += 1;
         sessions.set(fromId, session);
         await bot.answerCallbackQuery(query.id);
+        await deletePrompt(bot, query);
+        return askNext(bot, chatId, session);
+      }
+
+      if (data.startsWith('region:')) {
+        const session = sessions.get(fromId);
+        if (!session || session.action !== 'listing') return;
+        session.data.region = data.split(':')[1];
+        delete session.data.subregion;
+        session.stepIndex += 1;
+        sessions.set(fromId, session);
+        await bot.answerCallbackQuery(query.id);
+        await deletePrompt(bot, query);
+        return askNext(bot, chatId, session);
+      }
+
+      if (data.startsWith('subregion:')) {
+        const session = sessions.get(fromId);
+        if (!session || session.action !== 'listing') return;
+        session.data.subregion = data.split(':')[1];
+        session.stepIndex += 1;
+        sessions.set(fromId, session);
+        await bot.answerCallbackQuery(query.id);
+        await deletePrompt(bot, query);
+        return askNext(bot, chatId, session);
+      }
+
+      if (data.startsWith('currency:')) {
+        const session = sessions.get(fromId);
+        if (!session || session.action !== 'listing') return;
+        session.data.currency = data.split(':')[1];
+        session.stepIndex += 1;
+        sessions.set(fromId, session);
+        await bot.answerCallbackQuery(query.id);
+        await deletePrompt(bot, query);
         return askNext(bot, chatId, session);
       }
 
@@ -758,6 +976,7 @@ function createRealEstateBot() {
         if (!session || session.action !== 'listing') return;
         const choice = data.split(':')[1];
         await bot.answerCallbackQuery(query.id);
+        await deletePrompt(bot, query);
         if (choice === 'registered') {
           const user = getUser(fromId);
           session.data.contact_phone = user.phone;
@@ -776,6 +995,7 @@ function createRealEstateBot() {
         if (!session.photos.length) return bot.sendMessage(chatId, 'يجب إرسال صورة واحدة على الأقل.');
         session.stepIndex += 1;
         sessions.set(fromId, session);
+        await deletePrompt(bot, query);
         return askNext(bot, chatId, session);
       }
 
@@ -783,6 +1003,7 @@ function createRealEstateBot() {
         const session = sessions.get(fromId);
         if (!session || session.action !== 'listing') return;
         await bot.answerCallbackQuery(query.id);
+        await deletePrompt(bot, query);
         return sendListingToAdmin(bot, config, chatId, session);
       }
 
