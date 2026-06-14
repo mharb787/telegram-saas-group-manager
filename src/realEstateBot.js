@@ -106,6 +106,7 @@ function mainMenu() {
 function userKeyboard() {
   return {
     keyboard: [
+      [{ text: 'ابدأ' }],
       [{ text: 'إعلاناتي' }, { text: 'تعديل البروفايل' }],
       [{ text: 'الدخول للمجموعة' }],
       [{ text: 'حذف الحساب' }]
@@ -743,6 +744,17 @@ function confirmDeleteAccount(bot, chatId) {
   });
 }
 
+function sendStartMenu(bot, msg) {
+  if (isBlocked(msg.from.id)) {
+    return bot.sendMessage(msg.chat.id, 'تم إيقاف التسجيل لهذا الحساب بسبب تجاوز عدد محاولات الدخول. تواصل مع الإدارة للمراجعة.');
+  }
+  if (isRegistered(msg.from.id)) {
+    return bot.sendMessage(msg.chat.id, 'أهلاً بك. قائمة الخيارات جاهزة أسفل المحادثة.', { reply_markup: userKeyboard() })
+      .then(() => bot.sendMessage(msg.chat.id, 'اختر من القائمة:', { reply_markup: mainMenu() }));
+  }
+  return startRegistration(bot, msg.chat.id);
+}
+
 function startRegistration(bot, chatId) {
   if (isBlocked(chatId)) {
     return bot.sendMessage(chatId, 'تم إيقاف التسجيل لهذا الحساب بسبب تجاوز عدد محاولات الدخول. تواصل مع الإدارة للمراجعة.');
@@ -829,14 +841,7 @@ function createRealEstateBot() {
 
   bot.onText(/^\/start/, async (msg) => {
     if (!isPrivate(msg)) return;
-    if (isBlocked(msg.from.id)) {
-      return bot.sendMessage(msg.chat.id, 'تم إيقاف التسجيل لهذا الحساب بسبب تجاوز عدد محاولات الدخول. تواصل مع الإدارة للمراجعة.');
-    }
-    if (isRegistered(msg.from.id)) {
-      await bot.sendMessage(msg.chat.id, 'أهلاً بك. قائمة الخيارات جاهزة أسفل المحادثة.', { reply_markup: userKeyboard() });
-      return bot.sendMessage(msg.chat.id, 'اختر من القائمة:', { reply_markup: mainMenu() });
-    }
-    return startRegistration(bot, msg.chat.id);
+    return sendStartMenu(bot, msg);
   });
 
   bot.on('new_chat_members', async (msg) => {
@@ -865,6 +870,8 @@ function createRealEstateBot() {
     if (msg.text && msg.text.startsWith('/')) return;
 
     const text = (msg.text || '').trim();
+    if (text === 'ابدأ') return sendStartMenu(bot, msg);
+
     if (isRegistered(msg.from.id) && !sessions.has(msg.from.id)) {
       if (text === 'إعلاناتي') return sendMyListings(bot, msg.chat.id, msg.from.id);
       if (text === 'تعديل البروفايل' || text === 'تعديل بياناتي') return startRegistration(bot, msg.chat.id);
