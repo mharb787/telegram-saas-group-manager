@@ -155,6 +155,12 @@ function migrate() {
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS real_estate_meta (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE INDEX IF NOT EXISTS idx_real_estate_users_telegram_id ON real_estate_users(telegram_id);
     CREATE INDEX IF NOT EXISTS idx_real_estate_listings_user ON real_estate_listings(user_telegram_id);
     CREATE INDEX IF NOT EXISTS idx_real_estate_listings_status ON real_estate_listings(status);

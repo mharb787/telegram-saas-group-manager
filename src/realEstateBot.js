@@ -4,6 +4,36 @@ const { db } = require('./database');
 const sessions = new Map();
 const pendingTimers = new Map();
 
+const DAILY_GUIDE_META_KEY = 'daily_group_guide_last_sent_date';
+const DAILY_GUIDE_TEXT = [
+  '📌 طريقة استخدام بوت عقارات غزة',
+  '',
+  'أهلاً وسهلاً بكم في مجموعة عقارات غزة.',
+  '',
+  '✅ للبقاء في المجموعة ومتابعة العروض:',
+  '1. افتح بوت التسجيل: @realstategazabot',
+  '2. اضغط ابدأ.',
+  '3. شارك رقم هاتفك من زر مشاركة رقم الهاتف فقط.',
+  '4. اكتب اسمك أو كنيتك.',
+  '5. بعد التسجيل يمكنك متابعة العروض داخل المجموعة.',
+  '',
+  '🏠 لإضافة إعلان عقار:',
+  '1. افتح البوت: @realstategazabot',
+  '2. اضغط ابدأ.',
+  '3. اضغط عرض عقار من الرسالة داخل البوت.',
+  '4. اختر نوع العقار وأدخل التفاصيل المطلوبة.',
+  '5. أرسل صورة واحدة على الأقل للعقار.',
+  '6. راجع الإعلان ثم اضغط إرسال للإدارة.',
+  '',
+  '⚠️ ملاحظات مهمة:',
+  '- لا يتم نشر أي إعلان إلا بعد موافقة الإدارة.',
+  '- السعر والصورة مطلوبان في كل إعلان.',
+  '- رقم الهاتف الرسمي مطلوب للتسجيل.',
+  '- عند حذف حسابك من البوت سيتم إخراجك من المجموعة، ويمكنك الرجوع بعد التسجيل من جديد.',
+  '',
+  'إدارة عقارات غزة'
+].join('\n');
+
 const categories = {
   apartment: 'شقة',
   house: 'منزل',
@@ -131,6 +161,50 @@ function contactKeyboard() {
 
 function deleteAccount(telegramId) {
   db.prepare('DELETE FROM real_estate_users WHERE telegram_id = ?').run(telegramId);
+}
+
+function todayKey() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function getMeta(key) {
+  const row = db.prepare('SELECT value FROM real_estate_meta WHERE key = ?').get(key);
+  return row ? row.value : '';
+}
+
+function setMeta(key, value) {
+  db.prepare(`
+    INSERT INTO real_estate_meta (key, value, updated_at)
+    VALUES (?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(key) DO UPDATE SET
+      value = excluded.value,
+      updated_at = CURRENT_TIMESTAMP
+  `).run(key, value);
+}
+
+async function sendAndPinDailyGuide(bot, config) {
+  const currentDate = todayKey();
+  if (getMeta(DAILY_GUIDE_META_KEY) === currentDate) return false;
+
+  const message = await bot.sendMessage(config.offersGroupId, DAILY_GUIDE_TEXT, {
+    disable_web_page_preview: true
+  });
+  await bot.pinChatMessage(config.offersGroupId, message.message_id, {
+    disable_notification: true
+  }).catch((error) => {
+    console.warn('pin daily guide failed:', error.message);
+  });
+  setMeta(DAILY_GUIDE_META_KEY, currentDate);
+  return true;
+}
+
+function scheduleDailyGuide(bot, config) {
+  const run = () => sendAndPinDailyGuide(bot, config).catch((error) => {
+    console.warn('daily guide failed:', error.message);
+  });
+
+  run();
+  setInterval(run, 60 * 60 * 1000);
 }
 
 async function removeUserFromOffersGroup(bot, config, userId) {
@@ -854,6 +928,7 @@ function createRealEstateBot() {
   }
 
   const bot = new TelegramBot(config.token, { polling: true });
+  scheduleDailyGuide(bot, config);
 
   bot.onText(/^\/start/, async (msg) => {
     if (!isPrivate(msg)) return;
