@@ -106,8 +106,8 @@ function mainMenu() {
 function userKeyboard() {
   return {
     keyboard: [
-      [{ text: 'عرض عقار' }, { text: 'إعلاناتي' }],
-      [{ text: 'تعديل البروفايل' }, { text: 'الدخول للمجموعة' }],
+      [{ text: 'إعلاناتي' }, { text: 'تعديل البروفايل' }],
+      [{ text: 'الدخول للمجموعة' }],
       [{ text: 'حذف الحساب' }]
     ],
     resize_keyboard: true,
@@ -701,7 +701,8 @@ async function sendRegistrationSuccess(bot, chatId, config) {
 function startListingFlow(bot, chatId, fromId) {
   if (!isRegistered(fromId)) return startRegistration(bot, chatId);
   sessions.set(fromId, { action: 'listing', stepIndex: 0, data: {}, photos: [] });
-  return askCategory(bot, chatId);
+  return bot.sendMessage(chatId, 'بدء إضافة إعلان عقار.', { reply_markup: removeKeyboard() })
+    .then(() => askCategory(bot, chatId));
 }
 
 function sendMyListings(bot, chatId, fromId) {
@@ -854,7 +855,6 @@ function createRealEstateBot() {
 
     const text = (msg.text || '').trim();
     if (isRegistered(msg.from.id) && !sessions.has(msg.from.id)) {
-      if (text === 'عرض عقار') return startListingFlow(bot, msg.chat.id, msg.from.id);
       if (text === 'إعلاناتي') return sendMyListings(bot, msg.chat.id, msg.from.id);
       if (text === 'تعديل البروفايل' || text === 'تعديل بياناتي') return startRegistration(bot, msg.chat.id);
       if (text === 'الدخول للمجموعة') return sendOffersGroupLink(bot, msg.chat.id, config);
