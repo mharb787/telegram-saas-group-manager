@@ -127,6 +127,17 @@ function deleteAccount(telegramId) {
   db.prepare('DELETE FROM real_estate_users WHERE telegram_id = ?').run(telegramId);
 }
 
+async function removeUserFromOffersGroup(bot, config, userId) {
+  try {
+    await bot.banChatMember(config.offersGroupId, userId);
+    await bot.unbanChatMember(config.offersGroupId, userId, { only_if_banned: true });
+    return true;
+  } catch (error) {
+    console.warn('remove deleted account from group failed:', error.message);
+    return false;
+  }
+}
+
 function removeKeyboard() {
   return { remove_keyboard: true };
 }
@@ -967,7 +978,11 @@ function createRealEstateBot() {
         await deletePrompt(bot, query);
         sessions.delete(fromId);
         deleteAccount(fromId);
-        return bot.sendMessage(chatId, 'تم حذف حسابك من النظام. يمكنك التسجيل مرة أخرى في أي وقت.', { reply_markup: removeKeyboard() });
+        const removed = await removeUserFromOffersGroup(bot, config, fromId);
+        const message = removed
+          ? 'تم حذف حسابك من النظام وإخراجك من المجموعة. يمكنك الدخول مرة أخرى بعد إعادة التسجيل.'
+          : 'تم حذف حسابك من النظام. تعذر إخراجك من المجموعة تلقائيًا، تواصل مع الإدارة إذا بقيت داخلها.';
+        return bot.sendMessage(chatId, message, { reply_markup: removeKeyboard() });
       }
 
       if (data === 'flow:cancel') {
