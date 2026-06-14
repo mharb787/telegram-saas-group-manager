@@ -201,6 +201,10 @@ function rows(items, perRow = 2) {
   return result;
 }
 
+function withCancel(inlineKeyboard) {
+  return [...inlineKeyboard, [{ text: 'إلغاء', callback_data: 'flow:cancel' }]];
+}
+
 function deletePrompt(bot, query) {
   if (!query.message) return Promise.resolve();
   return bot.deleteMessage(query.message.chat.id, query.message.message_id).catch(() => {});
@@ -280,13 +284,12 @@ function askListingType(bot, chatId) {
   const session = sessions.get(chatId);
   return bot.sendMessage(chatId, promptText(session, 'اختر نوع العرض:'), {
     reply_markup: {
-      inline_keyboard: [
+      inline_keyboard: withCancel([
         [
           { text: 'بيع', callback_data: 'type:sale' },
           { text: 'إيجار', callback_data: 'type:rent' }
-        ],
-        [{ text: 'إلغاء', callback_data: 'flow:cancel' }]
-      ]
+        ]
+      ])
     }
   });
 }
@@ -351,12 +354,12 @@ function contactChoice(bot, chatId) {
   const session = sessions.get(chatId);
   return bot.sendMessage(chatId, promptText(session, 'اختر رقم التواصل:'), {
     reply_markup: {
-      inline_keyboard: [
+      inline_keyboard: withCancel([
         [
           { text: 'استخدام رقمي المسجل', callback_data: 'contact:registered' },
           { text: 'إضافة رقم آخر للتواصل', callback_data: 'contact:other' }
         ]
-      ]
+      ])
     }
   });
 }
@@ -365,14 +368,14 @@ function landKindChoice(bot, chatId) {
   const session = sessions.get(chatId);
   return bot.sendMessage(chatId, promptText(session, 'اختر نوع الأرض:'), {
     reply_markup: {
-      inline_keyboard: [
+      inline_keyboard: withCancel([
         [
           { text: 'سكنية', callback_data: 'landkind:residential' },
           { text: 'تجارية', callback_data: 'landkind:commercial' },
           { text: 'زراعية', callback_data: 'landkind:agricultural' },
           { text: 'غير محدد', callback_data: 'landkind:unknown' }
         ]
-      ]
+      ])
     }
   });
 }
@@ -381,10 +384,10 @@ function yesNo(bot, chatId, key) {
   const session = sessions.get(chatId);
   return bot.sendMessage(chatId, promptText(session, 'اختر:'), {
     reply_markup: {
-      inline_keyboard: [[
+      inline_keyboard: withCancel([[
         { text: 'نعم', callback_data: `${key}:yes` },
         { text: 'لا', callback_data: `${key}:no` }
-      ]]
+      ]])
     }
   });
 }
@@ -393,10 +396,10 @@ function roofStateChoice(bot, chatId) {
   const session = sessions.get(chatId);
   return bot.sendMessage(chatId, promptText(session, 'ما حالة الرووف؟'), {
     reply_markup: {
-      inline_keyboard: [[
+      inline_keyboard: withCancel([[
         { text: 'بناء قائم', callback_data: 'roof:built' },
         { text: 'مساحة مفتوحة', callback_data: 'roof:open' }
-      ]]
+      ]])
     }
   });
 }
@@ -405,7 +408,7 @@ function regionChoice(bot, chatId) {
   const session = sessions.get(chatId);
   return bot.sendMessage(chatId, promptText(session, 'اختر المنطقة:'), {
     reply_markup: {
-      inline_keyboard: rows(Object.entries(regions).map(([key, text]) => ({ text, callback_data: `region:${key}` })), 2)
+      inline_keyboard: withCancel(rows(Object.entries(regions).map(([key, text]) => ({ text, callback_data: `region:${key}` })), 2))
     }
   });
 }
@@ -414,7 +417,7 @@ function subregionChoice(bot, chatId, session) {
   const options = subregions[session.data.region] || {};
   return bot.sendMessage(chatId, promptText(session, 'اختر المنطقة الفرعية:'), {
     reply_markup: {
-      inline_keyboard: rows(Object.entries(options).map(([key, text]) => ({ text, callback_data: `subregion:${key}` })), 2)
+      inline_keyboard: withCancel(rows(Object.entries(options).map(([key, text]) => ({ text, callback_data: `subregion:${key}` })), 2))
     }
   });
 }
@@ -423,7 +426,7 @@ function currencyChoice(bot, chatId) {
   const session = sessions.get(chatId);
   return bot.sendMessage(chatId, promptText(session, 'اختر عملة السعر:'), {
     reply_markup: {
-      inline_keyboard: rows(Object.entries(currencies).map(([key, text]) => ({ text, callback_data: `currency:${key}` })), 2)
+      inline_keyboard: withCancel(rows(Object.entries(currencies).map(([key, text]) => ({ text, callback_data: `currency:${key}` })), 2))
     }
   });
 }
@@ -431,10 +434,10 @@ function currencyChoice(bot, chatId) {
 function numberChoice(bot, chatId, session, key, question) {
   return bot.sendMessage(chatId, promptText(session, `${question}\nيمكنك اختيار رقم أو كتابة العدد يدويًا.`), {
     reply_markup: {
-      inline_keyboard: [[1, 2, 3, 4, 5].map((value) => ({
+      inline_keyboard: withCancel([[1, 2, 3, 4, 5].map((value) => ({
         text: String(value),
         callback_data: `number:${key}:${value}`
-      }))]
+      }))])
     }
   });
 }
@@ -454,11 +457,15 @@ async function askNext(bot, chatId, session) {
   if (key === 'photos') {
     return bot.sendMessage(chatId, promptText(session, text), {
       reply_markup: {
-        inline_keyboard: [[{ text: 'تم', callback_data: 'photos:done' }]]
+        inline_keyboard: withCancel([[{ text: 'تم', callback_data: 'photos:done' }]])
       }
     });
   }
-  return bot.sendMessage(chatId, promptText(session, text));
+  return bot.sendMessage(chatId, promptText(session, text), {
+    reply_markup: {
+      inline_keyboard: withCancel([])
+    }
+  });
 }
 
 function listingLines(payload, options = {}) {
@@ -811,7 +818,7 @@ function createRealEstateBot() {
           session.photos.push(msg.photo[msg.photo.length - 1].file_id);
           sessions.set(msg.from.id, session);
           return bot.sendMessage(msg.chat.id, `تم استلام الصورة رقم ${session.photos.length}. أرسل صورة أخرى أو اضغط تم.`, {
-            reply_markup: { inline_keyboard: [[{ text: 'تم', callback_data: 'photos:done' }]] }
+            reply_markup: { inline_keyboard: withCancel([[{ text: 'تم', callback_data: 'photos:done' }]]) }
           });
         }
         return bot.sendMessage(msg.chat.id, 'أرسل صورة للعقار. صورة واحدة على الأقل إلزامية.');
@@ -1015,7 +1022,9 @@ function createRealEstateBot() {
           return askNext(bot, chatId, session);
         }
         sessions.set(fromId, { action: 'awaiting_other_contact', listing: session });
-        return bot.sendMessage(chatId, 'اكتب رقم التواصل الذي تريد ظهوره في الإعلان:');
+        return bot.sendMessage(chatId, 'اكتب رقم التواصل الذي تريد ظهوره في الإعلان:', {
+          reply_markup: { inline_keyboard: withCancel([]) }
+        });
       }
 
       if (data === 'photos:done') {
