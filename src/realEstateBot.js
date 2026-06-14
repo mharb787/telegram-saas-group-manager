@@ -498,9 +498,9 @@ function landKindChoice(bot, chatId) {
   ]]));
 }
 
-function yesNo(bot, chatId, key) {
+function yesNo(bot, chatId, key, question = 'اختر:') {
   const session = sessions.get(chatId);
-  return bot.sendMessage(chatId, promptText(session, 'اختر:'), promptOptions([[
+  return bot.sendMessage(chatId, promptText(session, question), promptOptions([[
     { text: 'نعم', callback_data: `${key}:yes` },
     { text: 'لا', callback_data: `${key}:no` }
   ]]));
@@ -552,7 +552,7 @@ async function askNext(bot, chatId, session) {
   if (['floors', 'bathrooms', 'rooms', 'floor'].includes(key)) return numberChoice(bot, chatId, session, key, text);
   if (key === 'contact') return contactChoice(bot, chatId);
   if (key === 'land_kind') return landKindChoice(bot, chatId);
-  if (key === 'has_extra_land') return yesNo(bot, chatId, 'extraLand');
+  if (key === 'has_extra_land') return yesNo(bot, chatId, 'extraLand', text);
   if (key === 'region') return regionChoice(bot, chatId);
   if (key === 'subregion') return subregionChoice(bot, chatId, session);
   if (key === 'currency') return currencyChoice(bot, chatId);
